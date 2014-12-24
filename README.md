@@ -3,6 +3,14 @@ git-ghpull
 
 Merge pull requests qiuckly with a helpful merge message
 
+Installation
+------------
+
+Install `git-ghpull` somewhere in PATH:
+
+    sudo curl https://raw.githubusercontent.com/djmitche/git-ghpull/master/git-ghpull > /usr/bin/git-ghpull
+    sudo chmod +x /usr/bin/git-ghpull
+
 Usage
 -----
 
