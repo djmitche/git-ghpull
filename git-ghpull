@@ -1,0 +1,44 @@
+#! /usr/bin/env python2.7
+
+import re
+import sys 
+import json
+import urllib2
+import subprocess
+
+# get config
+try:
+    github_username = subprocess.check_output(['git', 'config', 'ghpull.username']).strip()
+    github_reponame = subprocess.check_output(['git', 'config', 'ghpull.reponame']).strip()
+except subprocess.CalledProcessError:
+    print "Set git config ghpull.username and ghpull.reponame"
+    sys.exit(1)
+
+try:
+    github_options = subprocess.check_output(['git', 'config', 'ghpull.options']).strip().split()
+except subprocess.CalledProcessError:
+    github_options = []
+
+def main():
+    pullreq = sys.argv[1]
+    url = 'https://api.github.com/repos/%s/%s/pulls/%s' % (github_username, github_reponame, pullreq)
+    res = urllib2.urlopen(url)
+    data = json.load(res)
+
+    source_repo = data['head']['repo']['git_url']
+    source_ref = data['head']['ref']
+
+    failed = False
+    try:
+        subprocess.check_call(['git', 'pull', '--no-ff'] + github_options + [source_repo, source_ref])
+    except subprocess.CalledProcessError:
+        failed = True
+
+    # add the PR # to the end of the first line
+    merge_msg = open(".git/MERGE_MSG").read().strip().split('\n')
+    merge_msg[0] = re.sub("Merge branch '([^']*)' of git://github.com/([^/]*/[^/ ]*).*", r'Merge \2:\1 (PR #%s)' % pullreq, merge_msg[0], count=1)
+    open(".git/MERGE_MSG", "w").write('\n'.join(merge_msg))
+    if failed:
+        sys.exit(1)
+
+main()
