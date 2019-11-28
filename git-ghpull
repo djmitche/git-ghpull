@@ -1,44 +1,60 @@
-#! /usr/bin/env python2.7
-
+#! /usr/bin/env python3
 import re
 import sys 
 import json
-import urllib2
+import urllib.request
+import argparse
 import subprocess
 
 # get config
 try:
-    github_username = subprocess.check_output(['git', 'config', 'ghpull.username']).strip()
-    github_reponame = subprocess.check_output(['git', 'config', 'ghpull.reponame']).strip()
+    repo_url = subprocess.check_output(['git', 'remote', 'get-url', 'upstream']).strip().decode('utf-8')
+    if not repo_url.startswith('https://'):
+        print("`upstream` remote must be an https URL")
+        sys.exit(1)
+    repo_url = repo_url.split('/')
+    owner = repo_url[3]
+    repo = re.sub(r'\.git$', '', repo_url[4])
 except subprocess.CalledProcessError:
-    print "Set git config ghpull.username and ghpull.reponame"
+    print("`upstream` remote must exist")
     sys.exit(1)
 
-try:
-    github_options = subprocess.check_output(['git', 'config', 'ghpull.options']).strip().split()
-except subprocess.CalledProcessError:
-    github_options = []
-
 def main():
-    pullreq = sys.argv[1]
-    url = 'https://api.github.com/repos/%s/%s/pulls/%s' % (github_username, github_reponame, pullreq)
-    res = urllib2.urlopen(url)
+    parser = argparse.ArgumentParser(description='Process some integers.')
+    parser.add_argument('pullreq', metavar='PR', type=int,
+                        help='pull request to pull')
+    parser.add_argument('-f', '--force', dest='force', action='store_true',
+                        default=False,
+                        help='overwrite an existing branch with this name')
+    parser.add_argument('-p', '--pr-branch', dest='prbranch', action='store_true',
+                        default=False,
+                        help='use branch name `pr<PULLREQ>`')
+
+    args = parser.parse_args()
+
+    url = 'https://api.github.com/repos/%s/%s/pulls/%s' % (owner, repo, args.pullreq)
+    res = urllib.request.urlopen(url)
     data = json.load(res)
 
-    source_repo = data['head']['repo']['git_url']
+    remote = data['head']['repo']['owner']['login']
+    remote_url = data['head']['repo']['clone_url']
     source_ref = data['head']['ref']
 
-    failed = False
+    # add the remote if necessary
     try:
-        subprocess.check_call(['git', 'pull', '--no-ff'] + github_options + [source_repo, source_ref])
+        subprocess.check_call(['git', 'remote', 'add', remote, remote_url], stderr=subprocess.DEVNULL)
     except subprocess.CalledProcessError:
-        failed = True
+        pass
 
-    # add the PR # to the end of the first line
-    merge_msg = open(".git/MERGE_MSG").read().strip().split('\n')
-    merge_msg[0] = re.sub("Merge branch '([^']*)' of git://github.com/([^/]*/[^/ ]*).*", r'Merge \2:\1 (PR #%s)' % pullreq, merge_msg[0], count=1)
-    open(".git/MERGE_MSG", "w").write('\n'.join(merge_msg))
-    if failed:
+    # fetch its refs
+    subprocess.check_call(['git', 'fetch', remote])
+
+    # set up a new branch tracking it
+    branch = 'pr{}'.format(args.pullreq) if args.prbranch else source_ref
+    try:
+        subprocess.check_call(['git', 'checkout', '-B' if args.force else '-b', branch, '--track', '{}/{}'.format(remote, source_ref)])
+    except subprocess.CalledProcessError:
         sys.exit(1)
 
 main()
+
